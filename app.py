@@ -57,12 +57,12 @@ def triagem_sintomas(sintomas: str, api_key: str) -> str:
     except requests.exceptions.RequestException as e:
         return f"Erro ao conectar à API: {e}"
 
-# Rota que recebe os sintomas e retorna o resultado da triagem
+#recebe os sintomas e retorna o resultado da triagem
 @app.route('/triagem', methods=['POST'])
 def fazer_triagem():
     dados = request.get_json()
     sintomas = dados.get('sintomas', '')
-    api_key = 'sua-chave-aqui'  # Ou leia de uma variável de ambiente por segurança
+    api_key = 'sua-chave-aqui'  #colocar a variável de confiança do .cred
 
     resultado = triagem_sintomas(sintomas, api_key)
     return jsonify({'resultado': resultado})
