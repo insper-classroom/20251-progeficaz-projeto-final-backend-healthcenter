@@ -91,26 +91,38 @@ def simular_estimativa(cpf):
     }), 200
 
 #----------------------------------------------------------------------------------------------------------------------------------
-@app.route('/complementos', methods=['POST'])
-def complementos():
+@app.route('/complementos/<cpf>', methods=['PUT'])
+def complementos(cpf):
     db = connect_db()
     data = request.get_json()
 
-    altura = data.get('altura')
-    peso = data.get('peso')
-    pressao_arterial = data.get('pressao_arterial')
-    alergias = data.get('alergias')
+    atualizacoes = {}
 
-    info = {
-        'altura': altura,
-        'peso': peso,
-        'pressao_arterial': pressao_arterial,
-        'alergias': alergias
-    }
+    if 'altura' in data:
+        atualizacoes['altura'] = data['altura']
+    if 'peso' in data:
+        atualizacoes['peso'] = data['peso']
+    if 'pressao_arterial' in data:
+        atualizacoes['pressao_arterial'] = data['pressao_arterial']
+    if 'alergias' in data:
+        atualizacoes['alergias'] = data['alergias']
 
-    db['informacoes_saude'].insert_one(info)
+    if not atualizacoes:
+        return jsonify({'msg': 'Nenhuma informação de saúde fornecida'}), 400
 
-    return jsonify({'msg': 'Informações de saúde cadastradas com sucesso'}), 201
+    paciente = db['pacientes'].find_one({'cpf': cpf})
+    if not paciente:
+        return jsonify({'msg': 'Paciente não encontrado'}), 404
+
+    # Verifica se algum dos campos ainda não existia no paciente
+    campos_novos = [k for k in atualizacoes if k not in paciente]
+
+    db['pacientes'].update_one({'cpf': cpf}, {'$set': atualizacoes})
+
+    if campos_novos:
+        return jsonify({'msg': 'Informações de saúde adicionadas com sucesso'}), 200
+    else:
+        return jsonify({'msg': 'Informações de saúde atualizadas com sucesso'}), 200
 
 #----------------------------------------------------------------------------------------------------------------------------------
 
