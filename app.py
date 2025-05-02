@@ -23,9 +23,9 @@ def connect_db():
 app = Flask(__name__)
 
 #conectando com a api e função da triagem
-def triagem_sintomas(sintomas: str, api_key: str) -> str:
+def triagem_sintomas(sintomas: str, api_key: str):
     headers = {
-        'Authorization': f'Bearer {api_key}',
+        'Authorization': api_key,
         'Content-Type': 'application/json'
     }
 
@@ -46,7 +46,8 @@ def triagem_sintomas(sintomas: str, api_key: str) -> str:
 
     try:
         response = requests.post(
-            'https://api.openai.com/v1/chat/completions',
+            'https://<NOME-DO-RESOURCE>.openai.azure.com/openai/deployments/<NOME-DO-DEPLOYMENT>/chat/completions?api-version=<VERSAO-DA-API>',
+            #aqui precisa fazer algumas mudanças quando eu fizer o negócio la no azure
             headers=headers,
             json=data,
             timeout=10
@@ -62,7 +63,7 @@ def triagem_sintomas(sintomas: str, api_key: str) -> str:
 def fazer_triagem():
     dados = request.get_json()
     sintomas = dados.get('sintomas', '')
-    api_key = 'sua-chave-aqui'  #colocar a variável de confiança do .cred
+    api_key = 'sua-chave-aqui'  #colocar a variável de confiança do .env
 
     resultado = triagem_sintomas(sintomas, api_key)
     return jsonify({'resultado': resultado})
@@ -83,6 +84,36 @@ def get_pacientes():
         return {"pacientes": pacientes}, 200
     except Exception as e:
         return {"erro": f"Erro ao consultar pacientes: {str(e)}"}, 500
+
+@app.route('/finalizar', methods=['POST'])
+def concluir_atendimento():
+    db = connect_db()
+    data = request.get_json()
+    
+    cpf = data.get('cpf')
+    if not cpf:
+        return jsonify({"erro": "CPF é obrigatório"}), 400 
+    
+    
+    fila_atendimento = db['fila_atendimento']
+    paciente = fila_atendimento.find_one({"cpf": cpf}) #diferencia o paciente pelo cpf
+    
+    if not paciente:
+        return jsonify({"erro": "Paciente não encontrado na fila de atendimento"}), 404
+    
+    fila_atendimento.delete_one({"cpf": cpf}) # remove depois do atendimento, filtrando por cpf
+    
+    fila_restante = list(fila_atendimento.find().sort("posicao_fila", 1)) # atualiza posições
+    for i, p in enumerate(fila_restante):
+        fila_atendimento.update_one(
+            {"_id": p["_id"]},
+            {"$set": {"posicao_fila": i + 1}}
+        )
+    
+    return jsonify({
+        "mensagem": "Atendimento concluído com sucesso",
+        "paciente_removido": cpf
+    }), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
