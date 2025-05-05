@@ -4,7 +4,6 @@ import os
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from flask_bcrypt import Bcrypt
-import datetime
 
 load_dotenv()
 mongo_uri = os.getenv('MONGO_URI')
@@ -160,6 +159,7 @@ def cadastro():
 
     return jsonify({'msg': 'Usuário cadastrado com sucesso'}), 201
 #----------------------------------------------------------------------------------------------------------------------------------
+
 @app.route('/login', methods=['POST'])
 def login():
     db = connect_db()
@@ -181,6 +181,40 @@ def login():
         return jsonify({'msg': 'Senha incorreta'}), 401
 
     return jsonify({'msg': 'Login realizado com sucesso', 'cpf': paciente.get('cpf')}), 200
+
+#--------------------------------------------------------------------------------------------------------------
+
+@app.route('/atualizar_triagem/<cpf>', methods=['PUT'])
+def atualizar_triagem(cpf):
+    db = connect_db()
+    fila_triagem = db['fila_triagem']
+    fila_atendimento = db['fila_atendimento']
+
+    data = request.get_json()
+    nova_gravidade = data.get('triagem_oficial', '').lower().strip()
+
+    if nova_gravidade not in TEMPO_GRAVIDADE:
+        return jsonify({'erro': 'Gravidade inválida'}), 400
+
+    paciente = fila_triagem.find_one({"paciente_cpf": cpf})
+    if not paciente:
+        return jsonify({'erro': 'Paciente não encontrado na fila de triagem'}), 404
+
+    paciente['triagem_oficial'] = nova_gravidade
+
+  
+    nova_posicao = fila_atendimento.count_documents({}) + 1
+    paciente['posicao_fila'] = nova_posicao
+
+    fila_atendimento.insert_one(paciente)
+
+    fila_triagem.delete_one({"paciente_cpf": cpf})
+
+    return jsonify({'msg': 'Paciente movido para a fila de atendimento com sucesso'}), 200
+
+
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)
