@@ -34,7 +34,7 @@ def distribuir_baldes(tempos, n_funcionarios):
         idx = baldes.index(min(baldes))
         baldes[idx] += tempo
     return baldes
-
+#ISSO EH OQ O PACIENTE VE, E ISSO NAO ADD A FILA
 @app.route('/simular_estimativa/<cpf>', methods=['GET'])
 def simular_estimativa(cpf):
     gravidade = request.args.get("gravidade", "").lower().strip()
@@ -88,6 +88,84 @@ def simular_estimativa(cpf):
         "tempo_atendimento": f"{tempo_atendimento} minutos",
         "tempo_total_estimado": f"{tempo_total} minutos"
     }), 200
+#----------------------------------------------------------------------------------------------------------------------------------
+#ISSO EH OQ O FUNCIONARIO VE E ADD A FILA
+@app.route('/entrar_fila_triagem/<cpf>', methods=['POST'])
+def entrar_fila_triagem(cpf):
+    gravidade = request.args.get("gravidade", "").lower().strip()
+    if gravidade not in TEMPO_GRAVIDADE:
+        return jsonify({"erro": "Gravidade inválida"}), 400
+
+    db = connect_db()
+    fila_triagem = db['fila_triagem']
+    fila_atendimento = db['fila_atendimento']
+    funcionarios = db['funcionarios']
+    pacientes = db['pacientes']
+
+    # Verifica se o paciente existe
+    paciente_info = pacientes.find_one({"cpf": cpf})
+    if not paciente_info:
+        return jsonify({"erro": "Paciente não encontrado"}), 404
+
+    # Verifica se já está na fila
+    if fila_triagem.find_one({"paciente_cpf": cpf}) or fila_atendimento.find_one({"paciente_cpf": cpf}):
+        return jsonify({"erro": "Paciente já está em uma das filas"}), 400
+
+    # ----- POSIÇÃO E TEMPO DE TRIAGEM -----
+    posicao_triagem = fila_triagem.count_documents({}) + 1
+    triagistas = funcionarios.count_documents({"disponível": True, "cargo": "triagem"})
+    if triagistas == 0:
+        return jsonify({"erro": "Nenhum funcionário disponível para triagem"}), 500
+
+    tempo_triagem = ((posicao_triagem - 1) // triagistas) * 5 + 5
+
+    # ----- PESSOAS NA FRENTE NO ATENDIMENTO -----
+    fila_triagem_ordenada = list(fila_triagem.find().sort("posicao_fila", 1))
+    fila_atend = list(fila_atendimento.find().sort("posicao_fila", 1))
+
+    gravidades_antes = []
+
+    for p in fila_atend:
+        grav = p.get("triagem_oficial", "").lower().strip()
+        if grav in TEMPO_GRAVIDADE:
+            gravidades_antes.append(grav)
+
+    for p in fila_triagem_ordenada:
+        if p.get("posicao_fila", 999) < posicao_triagem:
+            grav = p.get("triagemIA", "").lower().strip()
+            if grav in TEMPO_GRAVIDADE:
+                gravidades_antes.append(grav)
+
+    atendentes = funcionarios.count_documents({"disponível": True, "cargo": "atendimento"})
+    if atendentes == 0:
+        return jsonify({"erro": "Nenhum funcionário disponível para atendimento"}), 500
+
+    tempos_antes = [TEMPO_GRAVIDADE[g] for g in gravidades_antes]
+    baldes = distribuir_baldes(tempos_antes, atendentes)
+    espera = min(baldes)
+    tempo_atendimento = espera + TEMPO_GRAVIDADE[gravidade]
+    posicao_atendimento = len(gravidades_antes) + 1
+    tempo_total = tempo_triagem + tempo_atendimento
+
+    # ----- INSERIR NA FILA -----
+    novo_paciente = {
+        "paciente_cpf": cpf,
+        "nome": paciente_info.get("nome_completo"),
+        "triagemIA": gravidade,
+        "posicao_fila": posicao_triagem
+    }
+    fila_triagem.insert_one(novo_paciente)
+
+    return jsonify({
+        "msg": "Paciente adicionado à fila de triagem com sucesso",
+        "gravidade": gravidade,
+        "posicao_triagem": posicao_triagem,
+        "tempo_triagem": f"{tempo_triagem} minutos",
+        "posicao_atendimento": posicao_atendimento,
+        "tempo_atendimento": f"{tempo_atendimento} minutos",
+        "tempo_total_estimado": f"{tempo_total} minutos"
+    }), 201
+
 
 #----------------------------------------------------------------------------------------------------------------------------------
 #funcionario 
@@ -125,7 +203,7 @@ def triagem(cpf):
         return jsonify({'msg': 'Informações de saúde atualizadas com sucesso'}), 200
 
 #----------------------------------------------------------------------------------------------------------------------------------
-
+#referente a primeira tela
 @app.route('/cadastro', methods=['POST'])
 def cadastro():
     db = connect_db()
