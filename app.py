@@ -90,8 +90,9 @@ def simular_estimativa(cpf):
     }), 200
 
 #----------------------------------------------------------------------------------------------------------------------------------
-@app.route('/complementos/<cpf>', methods=['PUT'])
-def complementos(cpf):
+#funcionario 
+@app.route('/triagem/<cpf>', methods=['PUT'])
+def triagem(cpf):
     db = connect_db()
     data = request.get_json()
 
@@ -183,9 +184,9 @@ def login():
     return jsonify({'msg': 'Login realizado com sucesso', 'cpf': paciente.get('cpf')}), 200
 
 #--------------------------------------------------------------------------------------------------------------
-
-@app.route('/atualizar_triagem/<cpf>', methods=['PUT'])
-def atualizar_triagem(cpf):
+#funcionario 
+@app.route('/atualizar_triagem_e_fila/<cpf>', methods=['PUT'])
+def atualizar_triagem_e_fila(cpf):
     db = connect_db()
     fila_triagem = db['fila_triagem']
     fila_atendimento = db['fila_atendimento']
@@ -196,21 +197,73 @@ def atualizar_triagem(cpf):
     if nova_gravidade not in TEMPO_GRAVIDADE:
         return jsonify({'erro': 'Gravidade inválida'}), 400
 
+    # Busca o paciente na fila de triagem
     paciente = fila_triagem.find_one({"paciente_cpf": cpf})
     if not paciente:
         return jsonify({'erro': 'Paciente não encontrado na fila de triagem'}), 404
 
-    paciente['triagem_oficial'] = nova_gravidade
+    posicao_removida = paciente.get("posicao_fila")
 
-  
+    # Atualiza a gravidade oficial e posição na fila de atendimento
+    paciente['triagem_oficial'] = nova_gravidade
     nova_posicao = fila_atendimento.count_documents({}) + 1
     paciente['posicao_fila'] = nova_posicao
-
     fila_atendimento.insert_one(paciente)
 
+    # Remove da fila de triagem
     fila_triagem.delete_one({"paciente_cpf": cpf})
 
+    # Atualiza as posições de quem estava atrás na fila de triagem
+    fila_triagem.update_many(
+        {"posicao_fila": {"$gt": posicao_removida}},
+        {"$inc": {"posicao_fila": -1}}
+    )
+
     return jsonify({'msg': 'Paciente movido para a fila de atendimento com sucesso'}), 200
+#--------------------------------------------------------------------------------------------------------------
+@app.route('/verifica_triagem/<cpf>', methods=['GET'])
+def verifica_triagem(cpf):
+    db = connect_db()
+    fila_atendimento = db['fila_atendimento']
+    funcionarios = db['funcionarios']
+
+    # Verifica se o paciente está na fila de atendimento
+    paciente = fila_atendimento.find_one({"paciente_cpf": cpf})
+    if not paciente:
+        return jsonify({"erro": "Paciente não está na fila de atendimento"}), 404
+
+    triagem_oficial = paciente.get("triagem_oficial", "").lower().strip()
+
+    if triagem_oficial not in TEMPO_GRAVIDADE:
+        return jsonify({
+            "msg": "A análise dos seus sintomas ainda não foi concluída... Por favor, tente novamente em alguns segundos."
+        }), 202
+
+    # Pega todas as pessoas com posição_fila menor que a do paciente
+    minha_posicao = paciente.get("posicao_fila", 999)
+    fila_ordenada = list(fila_atendimento.find().sort("posicao_fila", 1))
+
+    gravidades_antes = []
+    for p in fila_ordenada:
+        if p.get("posicao_fila", 999) < minha_posicao:
+            grav = p.get("triagem_oficial", "").lower().strip()
+            if grav in TEMPO_GRAVIDADE:
+                gravidades_antes.append(grav)
+
+    atendentes = funcionarios.count_documents({"disponível": True, "cargo": "atendimento"})
+    if atendentes == 0:
+        return jsonify({"erro": "Nenhum funcionário disponível para atendimento"}), 500
+
+    tempos_antes = [TEMPO_GRAVIDADE[g] for g in gravidades_antes]
+    baldes = distribuir_baldes(tempos_antes, atendentes)
+    espera = min(baldes)
+
+    return jsonify({
+        "msg": "Sua triagem foi concluída!",
+        "posicao_na_fila": minha_posicao,
+        "tempo_estimado_espera": f"{espera} minutos"
+    }), 200
+#--------------------------------------------------------------------------------------------------------------
 
 
 
