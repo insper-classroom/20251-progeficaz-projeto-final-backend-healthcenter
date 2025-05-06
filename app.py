@@ -346,9 +346,39 @@ def verifica_triagem(cpf):
     }), 200
 
 #--------------------------------------------------------------------------------------------------------------
+#tira paciente da fila atendimento e atualiza posicao dos demais
+@app.route('/remover_paciente_da_fila/<cpf>', methods=['DELETE'])
+def remover_paciente_da_fila(cpf):
+    db = connect_db()
+    fila_atendimento = db['fila_atendimento']
+    
+    # Encontra o paciente
+    paciente = fila_atendimento.find_one({"paciente_cpf": cpf})
+    if not paciente:
+        return jsonify({"erro": "Paciente não encontrado na fila de atendimento"}), 404
 
+    posicao_removida = paciente.get("posicao_fila", None)
+    
+    # Remove o paciente da fila
+    result = fila_atendimento.delete_one({"paciente_cpf": cpf})
+    if result.deleted_count == 0:
+        return jsonify({"erro": "Erro ao remover paciente"}), 500
 
+    # Atualiza as posições de quem estava atrás
+    fila_restante = list(fila_atendimento.find({"posicao_fila": {"$gt": posicao_removida}}))
+    for p in fila_restante:
+        nova_posicao = p["posicao_fila"] - 1
+        fila_atendimento.update_one(
+            {"paciente_cpf": p["paciente_cpf"]},
+            {"$set": {"posicao_fila": nova_posicao}}
+        )
 
+    return jsonify({
+        "msg": "Paciente removido com sucesso",
+        "cpf": paciente["paciente_cpf"],
+        "nome": paciente["nome"],
+        "triagem": paciente["triagem_oficial"]
+    }), 200
 
 
 if __name__ == '__main__':
