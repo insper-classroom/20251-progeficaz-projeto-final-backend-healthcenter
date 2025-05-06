@@ -91,28 +91,6 @@ def simular_estimativa(cpf):
     }), 200
 
 #----------------------------------------------------------------------------------------------------------------------------------
-@app.route('/complementos', methods=['POST'])
-def complementos():
-    db = connect_db()
-    data = request.get_json()
-
-    altura = data.get('altura')
-    peso = data.get('peso')
-    pressao_arterial = data.get('pressao_arterial')
-    alergias = data.get('alergias')
-
-    info = {
-        'altura': altura,
-        'peso': peso,
-        'pressao_arterial': pressao_arterial,
-        'alergias': alergias
-    }
-
-    db['informacoes_saude'].insert_one(info)
-
-    return jsonify({'msg': 'Informações de saúde cadastradas com sucesso'}), 201
-
-#----------------------------------------------------------------------------------------------------------------------------------
 
 @app.route('/cadastro', methods=['POST'])
 def cadastro():
@@ -169,6 +147,74 @@ def login():
         return jsonify({'msg': 'Senha incorreta'}), 401
 
     return jsonify({'msg': 'Login realizado com sucesso', 'cpf': paciente.get('cpf')}), 200
+
+#----------------------------------------------------------------------------------------------------------------------------------
+
+@app.route('/fila_atendimento/finalizar', methods=['POST'])
+def concluir_atendimento():
+    db = connect_db()
+    if not db:
+        return jsonify({"erro": "Falha na conexão com o banco de dados"}), 500
+
+    data = request.get_json()
+    paciente_cpf = data.get('paciente_cpf') 
+    
+    if not paciente_cpf:
+        return jsonify({"erro": "paciente_cpf é obrigatório"}), 400
+    
+    paciente_removido = remover_paciente_da_fila(db, paciente_cpf)
+    if not paciente_removido:
+        return jsonify({"erro": "Falha ao processar atendimento"}), 500
+    
+    if not atualizar_posicoes_fila(db):
+        return jsonify({"erro": "Atendimento concluído, mas falha ao atualizar posições"}), 200
+    
+    return jsonify({
+        "mensagem": "Atendimento concluído com sucesso",
+        "paciente_removido": paciente_removido
+    }), 200
+
+#------------------------------------------------------------------------------------------------
+
+@app.route('/pacientes/remover/paciente_cpf', methods=['DELETE'])
+def remover_paciente_da_fila(db, paciente_cpf):
+    fila_atendimento = db['fila_atendimento']
+    paciente = fila_atendimento.find_one({"paciente_cpf": paciente_cpf})
+    
+    if not paciente:
+        return None
+    
+    result = fila_atendimento.delete_one({"paciente_cpf": paciente_cpf})
+    
+    if result.deleted_count == 0:
+        return None
+    
+    return {
+        "cpf": paciente["paciente_cpf"],
+        "nome": paciente["nome"],
+        "triagem": paciente["triagem_oficial"]
+    }
+
+#------------------------------------------------------------------------------------------------
+
+@app.route('/fila_atendimento/atualizar', methods=['PUT'])
+def atualizar_posicoes_fila(db):
+    fila_atendimento = db['fila_atendimento']
+    pacientes_restantes = list(fila_atendimento.find().sort("posicao_fila", 1))
+    
+    
+    try:
+        for i, paciente in enumerate(pacientes_restantes, start=1):
+            fila_atendimento.update_one(
+                {"_id": paciente["_id"]},
+                {"$set": {"posicao_fila": i}}
+            )
+        return True
+    except Exception as e:
+        print(f"Erro ao atualizar posições: {str(e)}")
+        return False
+
+#----------------------------------------------------------------------------------------------------------------------------------
 
 if __name__ == '__main__':
     app.run(debug=True)
