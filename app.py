@@ -4,6 +4,7 @@ import os
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from flask_bcrypt import Bcrypt
+import requests
 
 load_dotenv()
 mongo_uri = os.getenv('MONGO_URI')
@@ -21,93 +22,147 @@ def connect_db():
     except Exception as e:
         print(f"Erro ao conectar ao MongoDB: {e}")
         return None
-
+#----------------------------------------------------------------------------------------------------------------------------------
 TEMPO_GRAVIDADE = {
     "leve": 20,
     "moderada": 40,
     "grave": 70
 }
-
+#----------------------------------------------------------------------------------------------------------------------------------
 def distribuir_baldes(tempos, n_funcionarios):
     baldes = [0] * n_funcionarios
     for tempo in tempos:
         idx = baldes.index(min(baldes))
         baldes[idx] += tempo
     return baldes
-#ISSO EH OQ O PACIENTE VE, E ISSO NAO ADD A FILA
-@app.route('/simular_estimativa/<cpf>', methods=['GET'])
-def simular_estimativa(cpf):
-    gravidade = request.args.get("gravidade", "").lower().strip()
-    if gravidade not in TEMPO_GRAVIDADE:
-        return jsonify({"erro": "Gravidade inválida"}), 400
 
-    db = connect_db()
-    fila_triagem = db['fila_triagem']
-    fila_atendimento = db['fila_atendimento']
-    funcionarios = db['funcionarios']
-
-    posicao_triagem = fila_triagem.count_documents({}) + 1
-    triagistas = funcionarios.count_documents({"disponível": True, "cargo": "triagem"})
-    if triagistas == 0:
-        return jsonify({"erro": "Nenhum funcionário disponível para triagem"}), 500
-
-    tempo_triagem = ((posicao_triagem - 1) // triagistas) * 5 + 5
-
-    fila_triagem_ordenada = list(fila_triagem.find().sort("posicao_fila", 1))
-    fila_atend = list(fila_atendimento.find().sort("posicao_fila", 1))
-
-    gravidades_antes = []
-
-    for p in fila_atend:
-        grav = p.get("triagem_oficial", "").lower().strip()
-        if grav in TEMPO_GRAVIDADE:
-            gravidades_antes.append(grav)
-
-    for p in fila_triagem_ordenada:
-        if p.get("posicao_fila", 999) < posicao_triagem:
-            grav = p.get("triagemIA", "").lower().strip()
-            if grav in TEMPO_GRAVIDADE:
-                gravidades_antes.append(grav)
-
-    atendentes = funcionarios.count_documents({"disponível": True, "cargo": "atendimento"})
-    if atendentes == 0:
-        return jsonify({"erro": "Nenhum funcionário disponível para atendimento"}), 500
-
-    tempos_antes = [TEMPO_GRAVIDADE[g] for g in gravidades_antes]
-    baldes = distribuir_baldes(tempos_antes, atendentes)
-    espera = min(baldes)
-    tempo_atendimento = espera + TEMPO_GRAVIDADE[gravidade]
-    posicao_atendimento = len(gravidades_antes) + 1
-    tempo_total = tempo_triagem + tempo_atendimento
-
-    return jsonify({
-        "gravidade": gravidade,
-        "posicao_triagem": posicao_triagem,
-        "tempo_triagem": f"{tempo_triagem} minutos",
-        "posicao_atendimento": posicao_atendimento,
-        "tempo_atendimento": f"{tempo_atendimento} minutos",
-        "tempo_total_estimado": f"{tempo_total} minutos"
-    }), 200
 #----------------------------------------------------------------------------------------------------------------------------------
-#ISSO EH OQ O FUNCIONARIO VE E ADD A FILA
+#conectando com a api e função da triagem
+def triagem_sintomas(sintomas: str):
+    headers = {
+        'Authorization': os.getenv('OPEN_AI_KEY'),
+        'Content-Type': 'application/json'
+    }
+
+    data = {
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Você é um assistente de triagem médica. "
+                    "Ao receber sintomas, você deve estimar a gravidade (leve, moderado, grave) "
+                    "com base no relato e retornar apenas a situação do problema, como leve, moderado ou grave"
+                )
+            },
+            {"role": "user", "content": sintomas}
+        ]
+    }
+
+    try:
+        response = requests.post(
+            'https://openai-insper.openai.azure.com/openai/deployments/gpt-4o_ProgEficaz/chat/completions?api-version=2025-01-01-preview',
+            #aqui precisa fazer algumas mudanças quando eu fizer o negócio la no azure
+            headers=headers,
+            json=data,
+            timeout=10
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result['choices'][0]['message']['content']
+    except requests.exceptions.RequestException as e:
+        return f"Erro ao conectar à API: {e}"
+#----------------------------------------------------------------------------------------------------------------------------------
+#BOTAO 1
+@app.route('/login', methods=['POST'])
+def login():
+    db = connect_db()
+    data = request.get_json()
+
+    email = data.get('email')
+    senha = data.get('senha')
+
+    if not email or not senha:
+        return jsonify({'msg': 'Email e senha são obrigatórios'}), 400
+
+    paciente = db['pacientes'].find_one({'email': email})
+    if not paciente:
+        return jsonify({'msg': 'Usuário não encontrado'}), 404
+
+    senha_hash = paciente.get('senha')
+
+    if not bcrypt.check_password_hash(senha_hash, senha):
+        return jsonify({'msg': 'Senha incorreta'}), 401
+
+    return jsonify({'msg': 'Login realizado com sucesso', 'cpf': paciente.get('cpf')}), 200
+#----------------------------------------------------------------------------------------------------------------------------------
+#BOTAO 2
+@app.route('/cadastro', methods=['POST'])
+def cadastro():
+    db = connect_db()
+    data = request.get_json()
+
+    email = data.get('email')
+    senha = data.get('senha')
+    nome_completo = data.get('nome_completo')
+    cpf = data.get('cpf')
+    celular = data.get('celular')
+    endereco = data.get('endereco')
+    
+
+    if not email or not senha:
+        return jsonify({'msg': 'Email e senha são obrigatórios'}), 400
+
+    if db['pacientes'].find_one({'email': email}):
+        return jsonify({'msg': 'Usuário já existe'}), 400
+
+    hashed = bcrypt.generate_password_hash(senha).decode('utf-8')
+
+    paciente = {
+        'email': email,
+        'senha': hashed,
+        'nome_completo': nome_completo,
+        'cpf': cpf,
+        'celular': celular,
+        'endereco': endereco
+    }
+
+    db['pacientes'].insert_one(paciente)
+
+    return jsonify({'msg': 'Usuário cadastrado com sucesso'}), 201
+#----------------------------------------------------------------------------------------------------------------------------------
+#BOTAO 3
 @app.route('/entrar_fila_triagem/<cpf>', methods=['POST'])
 def entrar_fila_triagem(cpf):
-    gravidade = request.args.get("gravidade", "").lower().strip()
-    if gravidade not in TEMPO_GRAVIDADE:
-        return jsonify({"erro": "Gravidade inválida"}), 400
-
     db = connect_db()
     fila_triagem = db['fila_triagem']
     fila_atendimento = db['fila_atendimento']
     funcionarios = db['funcionarios']
     pacientes = db['pacientes']
 
+    data = request.get_json()
+    sintomas = data.get("sintomas", "").strip()
+
+    if not sintomas:
+        return jsonify({"erro": "Sintomas não fornecidos"}), 400
+
+    # 🔍 Chamada à IA para obter a gravidade
+    resposta_ia = triagem_sintomas(sintomas)
+    print("Resposta da IA:", resposta_ia)
+
+    # Extrair a gravidade da resposta da IA
+    for grav in TEMPO_GRAVIDADE.keys():
+        if grav in resposta_ia.lower():
+            gravidade = grav
+            break
+    else:
+        return jsonify({"erro": "Não foi possível determinar a gravidade a partir dos sintomas"}), 400
+
     # Verifica se o paciente existe
     paciente_info = pacientes.find_one({"cpf": cpf})
     if not paciente_info:
         return jsonify({"erro": "Paciente não encontrado"}), 404
 
-    # Verifica se já está na fila
+    # Verifica se já está em alguma fila
     if fila_triagem.find_one({"paciente_cpf": cpf}) or fila_atendimento.find_one({"paciente_cpf": cpf}):
         return jsonify({"erro": "Paciente já está em uma das filas"}), 400
 
@@ -158,7 +213,8 @@ def entrar_fila_triagem(cpf):
 
     return jsonify({
         "msg": "Paciente adicionado à fila de triagem com sucesso",
-        "gravidade": gravidade,
+        "gravidade_estimada": gravidade,
+        "resposta_ia": resposta_ia.strip(),
         "posicao_triagem": posicao_triagem,
         "tempo_triagem": f"{tempo_triagem} minutos",
         "posicao_atendimento": posicao_atendimento,
@@ -166,9 +222,8 @@ def entrar_fila_triagem(cpf):
         "tempo_total_estimado": f"{tempo_total} minutos"
     }), 201
 
-
 #----------------------------------------------------------------------------------------------------------------------------------
-#funcionario 
+#BOTAO 4
 @app.route('/triagem/<cpf>', methods=['PUT'])
 def triagem(cpf):
     db = connect_db()
@@ -202,103 +257,44 @@ def triagem(cpf):
     else:
         return jsonify({'msg': 'Informações de saúde atualizadas com sucesso'}), 200
 
-#----------------------------------------------------------------------------------------------------------------------------------
-#referente a primeira tela
-@app.route('/cadastro', methods=['POST'])
-def cadastro():
-    db = connect_db()
-    data = request.get_json()
-
-    email = data.get('email')
-    senha = data.get('senha')
-    nome_completo = data.get('nome_completo')
-    cpf = data.get('cpf')
-    celular = data.get('celular')
-    endereco = data.get('endereco')
-    
-
-    if not email or not senha:
-        return jsonify({'msg': 'Email e senha são obrigatórios'}), 400
-
-    if db['pacientes'].find_one({'email': email}):
-        return jsonify({'msg': 'Usuário já existe'}), 400
-
-    hashed = bcrypt.generate_password_hash(senha).decode('utf-8')
-
-    paciente = {
-        'email': email,
-        'senha': hashed,
-        'nome_completo': nome_completo,
-        'cpf': cpf,
-        'celular': celular,
-        'endereco': endereco
-    }
-
-    db['pacientes'].insert_one(paciente)
-
-    return jsonify({'msg': 'Usuário cadastrado com sucesso'}), 201
-#----------------------------------------------------------------------------------------------------------------------------------
-
-@app.route('/login', methods=['POST'])
-def login():
-    db = connect_db()
-    data = request.get_json()
-
-    email = data.get('email')
-    senha = data.get('senha')
-
-    if not email or not senha:
-        return jsonify({'msg': 'Email e senha são obrigatórios'}), 400
-
-    paciente = db['pacientes'].find_one({'email': email})
-    if not paciente:
-        return jsonify({'msg': 'Usuário não encontrado'}), 404
-
-    senha_hash = paciente.get('senha')
-
-    if not bcrypt.check_password_hash(senha_hash, senha):
-        return jsonify({'msg': 'Senha incorreta'}), 401
-
-    return jsonify({'msg': 'Login realizado com sucesso', 'cpf': paciente.get('cpf')}), 200
-
 #--------------------------------------------------------------------------------------------------------------
-#funcionario 
-@app.route('/atualizar_triagem_e_fila/<cpf>', methods=['PUT'])
-def atualizar_triagem_e_fila(cpf):
+# BOTAO 5
+@app.route('/remover_paciente_da_fila/<cpf>', methods=['DELETE'])
+def remover_paciente_da_fila(cpf):
     db = connect_db()
-    fila_triagem = db['fila_triagem']
     fila_atendimento = db['fila_atendimento']
-
-    data = request.get_json()
-    nova_gravidade = data.get('triagem_oficial', '').lower().strip()
-
-    if nova_gravidade not in TEMPO_GRAVIDADE:
-        return jsonify({'erro': 'Gravidade inválida'}), 400
-
-    # Busca o paciente na fila de triagem
-    paciente = fila_triagem.find_one({"paciente_cpf": cpf})
+    
+    # Encontra o paciente
+    paciente = fila_atendimento.find_one({"paciente_cpf": cpf})
     if not paciente:
-        return jsonify({'erro': 'Paciente não encontrado na fila de triagem'}), 404
+        return jsonify({"erro": "Paciente não encontrado na fila de atendimento"}), 404
 
-    posicao_removida = paciente.get("posicao_fila")
+    posicao_removida = paciente.get("posicao_fila", None)
+    
+    # Remove o paciente da fila
+    result = fila_atendimento.delete_one({"paciente_cpf": cpf})
+    if result.deleted_count == 0:
+        return jsonify({"erro": "Erro ao remover paciente"}), 500
 
-    # Atualiza a gravidade oficial e posição na fila de atendimento
-    paciente['triagem_oficial'] = nova_gravidade
-    nova_posicao = fila_atendimento.count_documents({}) + 1
-    paciente['posicao_fila'] = nova_posicao
-    fila_atendimento.insert_one(paciente)
+    # Atualiza as posições de quem estava atrás
+    fila_restante = list(fila_atendimento.find({"posicao_fila": {"$gt": posicao_removida}}))
+    for p in fila_restante:
+        nova_posicao = p["posicao_fila"] - 1
+        fila_atendimento.update_one(
+            {"paciente_cpf": p["paciente_cpf"]},
+            {"$set": {"posicao_fila": nova_posicao}}
+        )
 
-    # Remove da fila de triagem
-    fila_triagem.delete_one({"paciente_cpf": cpf})
+    return jsonify({
+        "msg": "Paciente removido com sucesso",
+        "cpf": paciente["paciente_cpf"],
+        "nome": paciente["nome"],
+        "triagem": paciente["triagem_oficial"]
+    }), 200
 
-    # Atualiza as posições de quem estava atrás na fila de triagem
-    fila_triagem.update_many(
-        {"posicao_fila": {"$gt": posicao_removida}},
-        {"$inc": {"posicao_fila": -1}}
-    )
 
-    return jsonify({'msg': 'Paciente movido para a fila de atendimento com sucesso'}), 200
 #--------------------------------------------------------------------------------------------------------------
+# BOTAO 6 e 7
 @app.route('/verifica_triagem/<cpf>', methods=['GET'])
 def verifica_triagem(cpf):
     db = connect_db()
@@ -344,41 +340,45 @@ def verifica_triagem(cpf):
         "posicao_na_fila": minha_posicao,
         "tempo_estimado_espera": f"{tempo_real} minutos"
     }), 200
-
 #--------------------------------------------------------------------------------------------------------------
-#tira paciente da fila atendimento e atualiza posicao dos demais
-@app.route('/remover_paciente_da_fila/<cpf>', methods=['DELETE'])
-def remover_paciente_da_fila(cpf):
+# BOTAO 8
+@app.route('/atualizar_triagem_e_fila/<cpf>', methods=['PUT'])
+def atualizar_triagem_e_fila(cpf):
     db = connect_db()
+    fila_triagem = db['fila_triagem']
     fila_atendimento = db['fila_atendimento']
-    
-    # Encontra o paciente
-    paciente = fila_atendimento.find_one({"paciente_cpf": cpf})
+
+    data = request.get_json()
+    nova_gravidade = data.get('triagem_oficial', '').lower().strip()
+
+    if nova_gravidade not in TEMPO_GRAVIDADE:
+        return jsonify({'erro': 'Gravidade inválida'}), 400
+
+    # Busca o paciente na fila de triagem
+    paciente = fila_triagem.find_one({"paciente_cpf": cpf})
     if not paciente:
-        return jsonify({"erro": "Paciente não encontrado na fila de atendimento"}), 404
+        return jsonify({'erro': 'Paciente não encontrado na fila de triagem'}), 404
 
-    posicao_removida = paciente.get("posicao_fila", None)
-    
-    # Remove o paciente da fila
-    result = fila_atendimento.delete_one({"paciente_cpf": cpf})
-    if result.deleted_count == 0:
-        return jsonify({"erro": "Erro ao remover paciente"}), 500
+    posicao_removida = paciente.get("posicao_fila")
 
-    # Atualiza as posições de quem estava atrás
-    fila_restante = list(fila_atendimento.find({"posicao_fila": {"$gt": posicao_removida}}))
-    for p in fila_restante:
-        nova_posicao = p["posicao_fila"] - 1
-        fila_atendimento.update_one(
-            {"paciente_cpf": p["paciente_cpf"]},
-            {"$set": {"posicao_fila": nova_posicao}}
-        )
+    # Atualiza a gravidade oficial e posição na fila de atendimento
+    paciente['triagem_oficial'] = nova_gravidade
+    nova_posicao = fila_atendimento.count_documents({}) + 1
+    paciente['posicao_fila'] = nova_posicao
+    fila_atendimento.insert_one(paciente)
 
-    return jsonify({
-        "msg": "Paciente removido com sucesso",
-        "cpf": paciente["paciente_cpf"],
-        "nome": paciente["nome"],
-        "triagem": paciente["triagem_oficial"]
-    }), 200
+    # Remove da fila de triagem
+    fila_triagem.delete_one({"paciente_cpf": cpf})
+
+    # Atualiza as posições de quem estava atrás na fila de triagem
+    fila_triagem.update_many(
+        {"posicao_fila": {"$gt": posicao_removida}},
+        {"$inc": {"posicao_fila": -1}}
+    )
+
+    return jsonify({'msg': 'Paciente movido para a fila de atendimento com sucesso'}), 200
+#--------------------------------------------------------------------------------------------------------------
+
 
 
 if __name__ == '__main__':
