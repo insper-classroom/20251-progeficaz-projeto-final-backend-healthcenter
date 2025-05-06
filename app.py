@@ -150,7 +150,7 @@ def cadastro():
     return jsonify({'msg': 'Usuário cadastrado com sucesso'}), 201
 #----------------------------------------------------------------------------------------------------------------------------------
 #BOTAO 3
-@app.route('/entrar_fila_triagem/<cpf>', methods=['POST'])
+@app.route('/triagem/<cpf>', methods=['POST'])
 def entrar_fila_triagem(cpf):
     db = connect_db()
     fila_triagem = db['fila_triagem']
@@ -278,7 +278,7 @@ def triagem(cpf):
 
 #--------------------------------------------------------------------------------------------------------------
 # BOTAO 5
-@app.route('/remover_paciente_da_fila/<cpf>', methods=['DELETE'])
+@app.route('/atendimento/<cpf>', methods=['DELETE'])
 def remover_paciente_da_fila(cpf):
     db = connect_db()
     fila_atendimento = db['fila_atendimento']
@@ -314,7 +314,7 @@ def remover_paciente_da_fila(cpf):
 
 #--------------------------------------------------------------------------------------------------------------
 # BOTAO 6 e 7
-@app.route('/verifica_triagem/<cpf>', methods=['GET'])
+@app.route('/triagem/<cpf>', methods=['GET'])
 def verifica_triagem(cpf):
     db = connect_db()
     fila_atendimento = db['fila_atendimento']
@@ -361,7 +361,7 @@ def verifica_triagem(cpf):
     }), 200
 #--------------------------------------------------------------------------------------------------------------
 # BOTAO 8
-@app.route('/atualizar_triagem_e_fila/<cpf>', methods=['PUT'])
+@app.route('/triagem_e_fila/<cpf>', methods=['PUT'])
 def atualizar_triagem_e_fila(cpf):
     db = connect_db()
     fila_triagem = db['fila_triagem']
