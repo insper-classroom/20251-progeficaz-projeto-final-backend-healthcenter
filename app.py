@@ -13,6 +13,7 @@ app = Flask(__name__)
 bcrypt = Bcrypt(app)
 CORS(app)
 
+#----------------------------------------------------------------------------------------------------------------------------------
 def connect_db():
     try:
         print(f"Tentando conectar usando a URI: {mongo_uri}")
@@ -35,6 +36,13 @@ def distribuir_baldes(tempos, n_funcionarios):
         idx = baldes.index(min(baldes))
         baldes[idx] += tempo
     return baldes
+# ---------------------------------------------------------------------------------------------------------------
+#ISSO EH OQ O PACIENTE VE, E ISSO NAO ADD A FILA
+@app.route('/estimativa/<cpf>', methods=['GET'])
+def simular_estimativa(cpf):
+    gravidade = request.args.get("gravidade", "").lower().strip()
+    if gravidade not in TEMPO_GRAVIDADE:
+        return jsonify({"erro": "Gravidade inválida"}), 400
 
 #----------------------------------------------------------------------------------------------------------------------------------
 #conectando com a api e função da triagem
@@ -164,7 +172,7 @@ def entrar_fila_triagem(cpf):
     if not sintomas:
         return jsonify({"erro": "Sintomas não fornecidos"}), 400
 
-    # 🔍 Chamada à IA para obter a gravidade
+    # Chamada à IA para obter a gravidade
     resposta_ia = triagem_sintomas(sintomas)
     print("Resposta da IA:", resposta_ia)
 
@@ -311,7 +319,6 @@ def remover_paciente_da_fila(cpf):
         "triagem": paciente["triagem_oficial"]
     }), 200
 
-
 #--------------------------------------------------------------------------------------------------------------
 # BOTAO 6 e 7
 @app.route('/triagem/<cpf>', methods=['GET'])
@@ -359,6 +366,7 @@ def verifica_triagem(cpf):
         "posicao_na_fila": minha_posicao,
         "tempo_estimado_espera": f"{tempo_real} minutos"
     }), 200
+
 #--------------------------------------------------------------------------------------------------------------
 # BOTAO 8
 @app.route('/triagem_e_fila/<cpf>', methods=['PUT'])
@@ -397,8 +405,6 @@ def atualizar_triagem_e_fila(cpf):
 
     return jsonify({'msg': 'Paciente movido para a fila de atendimento com sucesso'}), 200
 #--------------------------------------------------------------------------------------------------------------
-
-
 
 if __name__ == '__main__':
     app.run(debug=True)
