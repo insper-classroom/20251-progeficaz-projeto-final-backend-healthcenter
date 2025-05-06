@@ -317,7 +317,6 @@ def verifica_triagem(cpf):
             "msg": "A análise dos seus sintomas ainda não foi concluída... Por favor, tente novamente em alguns segundos."
         }), 202
 
-    # Pega todas as pessoas com posição_fila menor que a do paciente
     minha_posicao = paciente.get("posicao_fila", 999)
     fila_ordenada = list(fila_atendimento.find().sort("posicao_fila", 1))
 
@@ -332,15 +331,20 @@ def verifica_triagem(cpf):
     if atendentes == 0:
         return jsonify({"erro": "Nenhum funcionário disponível para atendimento"}), 500
 
+    # Calcula tempo estimado real usando distribuição dos tempos nas filas
     tempos_antes = [TEMPO_GRAVIDADE[g] for g in gravidades_antes]
     baldes = distribuir_baldes(tempos_antes, atendentes)
-    espera = min(baldes)
+    menor_carga = min(baldes)
+
+    # Adiciona seu próprio tempo de atendimento
+    tempo_real = menor_carga + TEMPO_GRAVIDADE[triagem_oficial]
 
     return jsonify({
         "msg": "Sua triagem foi concluída!",
         "posicao_na_fila": minha_posicao,
-        "tempo_estimado_espera": f"{espera} minutos"
+        "tempo_estimado_espera": f"{tempo_real} minutos"
     }), 200
+
 #--------------------------------------------------------------------------------------------------------------
 
 
