@@ -12,6 +12,7 @@ app = Flask(__name__)
 bcrypt = Bcrypt(app)
 CORS(app)
 
+#----------------------------------------------------------------------------------------------------------------------------------
 def connect_db():
     try:
         print(f"Tentando conectar usando a URI: {mongo_uri}")
@@ -34,8 +35,10 @@ def distribuir_baldes(tempos, n_funcionarios):
         idx = baldes.index(min(baldes))
         baldes[idx] += tempo
     return baldes
+#-------------------
+# ---------------------------------------------------------------------------------------------------------------
 #ISSO EH OQ O PACIENTE VE, E ISSO NAO ADD A FILA
-@app.route('/simular_estimativa/<cpf>', methods=['GET'])
+@app.route('/estimativa/<cpf>', methods=['GET'])
 def simular_estimativa(cpf):
     gravidade = request.args.get("gravidade", "").lower().strip()
     if gravidade not in TEMPO_GRAVIDADE:
@@ -90,7 +93,7 @@ def simular_estimativa(cpf):
     }), 200
 #----------------------------------------------------------------------------------------------------------------------------------
 #ISSO EH OQ O FUNCIONARIO VE E ADD A FILA
-@app.route('/entrar_fila_triagem/<cpf>', methods=['POST'])
+@app.route('/triagem/<cpf>', methods=['POST'])
 def entrar_fila_triagem(cpf):
     gravidade = request.args.get("gravidade", "").lower().strip()
     if gravidade not in TEMPO_GRAVIDADE:
@@ -165,7 +168,6 @@ def entrar_fila_triagem(cpf):
         "tempo_atendimento": f"{tempo_atendimento} minutos",
         "tempo_total_estimado": f"{tempo_total} minutos"
     }), 201
-
 
 #----------------------------------------------------------------------------------------------------------------------------------
 #funcionario 
@@ -263,7 +265,7 @@ def login():
 
 #--------------------------------------------------------------------------------------------------------------
 #funcionario 
-@app.route('/atualizar_triagem_e_fila/<cpf>', methods=['PUT'])
+@app.route('/triagem_e_fila/<cpf>', methods=['PUT'])
 def atualizar_triagem_e_fila(cpf):
     db = connect_db()
     fila_triagem = db['fila_triagem']
@@ -299,7 +301,7 @@ def atualizar_triagem_e_fila(cpf):
 
     return jsonify({'msg': 'Paciente movido para a fila de atendimento com sucesso'}), 200
 #--------------------------------------------------------------------------------------------------------------
-@app.route('/verifica_triagem/<cpf>', methods=['GET'])
+@app.route('/triagem/<cpf>', methods=['GET'])
 def verifica_triagem(cpf):
     db = connect_db()
     fila_atendimento = db['fila_atendimento']
@@ -347,7 +349,7 @@ def verifica_triagem(cpf):
 
 #--------------------------------------------------------------------------------------------------------------
 #tira paciente da fila atendimento e atualiza posicao dos demais
-@app.route('/remover_paciente_da_fila/<cpf>', methods=['DELETE'])
+@app.route('/atendimento/<cpf>', methods=['DELETE'])
 def remover_paciente_da_fila(cpf):
     db = connect_db()
     fila_atendimento = db['fila_atendimento']
