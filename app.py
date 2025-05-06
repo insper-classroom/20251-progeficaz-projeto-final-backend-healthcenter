@@ -84,16 +84,35 @@ def login():
     if not email or not senha:
         return jsonify({'msg': 'Email e senha são obrigatórios'}), 400
 
+    # Primeiro verifica se é paciente
     paciente = db['pacientes'].find_one({'email': email})
-    if not paciente:
-        return jsonify({'msg': 'Usuário não encontrado'}), 404
+    if paciente:
+        senha_hash = paciente.get('senha')
+        if bcrypt.check_password_hash(senha_hash, senha):
+            return jsonify({
+                'msg': 'Login realizado com sucesso',
+                'cpf': paciente.get('cpf'),
+                'tipo': 'paciente'
+            }), 200
+        else:
+            return jsonify({'msg': 'Senha incorreta'}), 401
 
-    senha_hash = paciente.get('senha')
+    # Depois tenta verificar se é funcionário
+    funcionario = db['funcionarios'].find_one({'email': email})
+    if funcionario:
+        senha_hash = funcionario.get('senha')
+        if bcrypt.check_password_hash(senha_hash, senha):
+            return jsonify({
+                'msg': 'Login realizado com sucesso',
+                'cpf': funcionario.get('cpf'),
+                'tipo': 'funcionario'
+            }), 200
+        else:
+            return jsonify({'msg': 'Senha incorreta'}), 401
 
-    if not bcrypt.check_password_hash(senha_hash, senha):
-        return jsonify({'msg': 'Senha incorreta'}), 401
+    return jsonify({'msg': 'Usuário não encontrado'}), 404
 
-    return jsonify({'msg': 'Login realizado com sucesso', 'cpf': paciente.get('cpf')}), 200
+
 #----------------------------------------------------------------------------------------------------------------------------------
 #BOTAO 2
 @app.route('/cadastro', methods=['POST'])
