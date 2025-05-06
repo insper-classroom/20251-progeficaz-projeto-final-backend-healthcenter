@@ -172,7 +172,7 @@ def entrar_fila_triagem(cpf):
     if not sintomas:
         return jsonify({"erro": "Sintomas não fornecidos"}), 400
 
-    # 🔍 Chamada à IA para obter a gravidade
+    # Chamada à IA para obter a gravidade
     resposta_ia = triagem_sintomas(sintomas)
     print("Resposta da IA:", resposta_ia)
 
@@ -319,7 +319,6 @@ def atualizar_triagem_e_fila(cpf):
         "triagem": paciente["triagem_oficial"]
     }), 200
 
-
 #--------------------------------------------------------------------------------------------------------------
 @app.route('/triagem/<cpf>', methods=['GET'])
 def verifica_triagem(cpf):
@@ -366,6 +365,7 @@ def verifica_triagem(cpf):
         "posicao_na_fila": minha_posicao,
         "tempo_estimado_espera": f"{tempo_real} minutos"
     }), 200
+
 #--------------------------------------------------------------------------------------------------------------
 #tira paciente da fila atendimento e atualiza posicao dos demais
 @app.route('/atendimento/<cpf>', methods=['DELETE'])
@@ -404,8 +404,6 @@ def remover_paciente_da_fila(cpf):
 
     return jsonify({'msg': 'Paciente movido para a fila de atendimento com sucesso'}), 200
 #--------------------------------------------------------------------------------------------------------------
-
-
 
 if __name__ == '__main__':
     app.run(debug=True)
