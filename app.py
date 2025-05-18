@@ -234,7 +234,8 @@ def entrar_fila_triagem(cpf):
         "paciente_cpf": cpf,
         "nome": paciente_info.get("nome_completo"),
         "triagemIA": gravidade,
-        "posicao_fila": posicao_triagem
+        "posicao_fila": posicao_triagem,
+        "sintomas": sintomas
     }
     fila_triagem.insert_one(novo_paciente)
 
@@ -405,6 +406,16 @@ def atualizar_triagem_e_fila(cpf):
 
     return jsonify({'msg': 'Paciente movido para a fila de atendimento com sucesso'}), 200
 #--------------------------------------------------------------------------------------------------------------
+
+@app.route('/pacientes', methods=['GET'])
+def get_pacientes():
+
+    db = connect_db()
+    fila_triagem = db['fila_triagem']
+
+    pacientes = list(fila_triagem.find({}, {'_id': 0}))
+
+    return jsonify(pacientes)
 
 if __name__ == '__main__':
     app.run(debug=True)
